@@ -4,6 +4,10 @@
 #pragma once
 
 #include <util/common/gui/SimulationDialog.h>
+#include <util/common/gui/PlotControl.h>
+#include "afxcmn.h"
+
+#include "model.h"
 
 // CTrackingDlg dialog
 class CTrackingDlg : public CSimulationDialog
@@ -27,4 +31,13 @@ protected:
     afx_msg void OnPaint();
     afx_msg HCURSOR OnQueryDragIcon();
     DECLARE_MESSAGE_MAP()
+public:
+    model::model_data m_data;
+    CPlotControl m_videoCtrl;
+    afx_msg void OnBnClickedButton1();
+    afx_msg void OnBnClickedButton2();
+    CSliderCtrl m_frameSlider;
+    afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
+    afx_msg void OnBnClickedButton3();
+    void OnSimulation() override;
 };
