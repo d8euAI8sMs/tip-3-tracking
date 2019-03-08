@@ -31,14 +31,22 @@ END_MESSAGE_MAP()
 
 void CVideoPlayer::OnLButtonDown(UINT nFlags, CPoint point)
 {
-    if (callback) callback({ point.x, point.y }, true);
+    if (callback)
+    {
+        CRect r; GetClientRect(&r);
+        callback({ (float) point.x / r.Width(), (float) point.y / r.Height() }, true);
+    }
 
     CPlotControl::OnLButtonDown(nFlags, point);
 }
 
 void CVideoPlayer::OnRButtonDown(UINT nFlags, CPoint point)
 {
-    if (callback) callback({ point.x, point.y }, false);
+    if (callback)
+    {
+        CRect r; GetClientRect(&r);
+        callback({ (float) point.x / r.Width(), (float) point.y / r.Height() }, false);
+    }
 
     CPlotControl::OnRButtonDown(nFlags, point);
 }

@@ -17,7 +17,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
     const model::model_data * m_data;
 public:
-    std::function < void (const geom::point < int > &, bool lbutton) > callback;
+    std::function < void (const geom::point2d_t &, bool lbutton) > callback;
     void Init(const model::model_data & data)
     {
         m_data = &data;

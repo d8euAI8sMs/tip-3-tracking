@@ -26,6 +26,7 @@ void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Control(pDX, IDC_VIDEO, m_videoCtrl);
     DDX_Text(pDX, IDC_EDIT1, m_data.params.target_resolution_w);
     DDX_Text(pDX, IDC_EDIT2, m_data.params.target_resolution_h);
+    DDX_Text(pDX, IDC_EDIT3, m_data.params.max_frames);
 }
 
 BEGIN_MESSAGE_MAP(CTrackingDlg, CSimulationDialog)
@@ -51,9 +52,29 @@ BOOL CTrackingDlg::OnInitDialog()
     // TODO: Add extra initialization here
 
     m_videoCtrl.Init(m_data);
-    m_videoCtrl.callback = [this] (const geom::point < int > & p, bool lbutton) {
-        if (lbutton) m_data.decorator.markers.push_back(p);
-        else m_data.decorator.markers.clear();
+    m_videoCtrl.callback = [this] (const geom::point2d_t & p, bool lbutton) {
+        if (lbutton)
+        {
+            if ((m_data.decorator.markers.size() & 1) == 1)
+            {
+                auto p0 = m_data.decorator.markers.back();
+                auto p1 = p;
+                if (p0.x > p1.x) std::swap(p0.x, p1.x);
+                if (p0.y > p1.y) std::swap(p0.y, p1.y);
+                m_data.decorator.bounding_boxes.emplace_back(
+                    p0.x, p1.x, p0.y, p1.y
+                );
+            }
+            m_data.decorator.markers.push_back(p);
+        }
+        else if (!m_data.decorator.markers.empty())
+        {
+            m_data.decorator.markers.pop_back();
+            if (m_data.decorator.markers.size() & 1 == 1)
+            {
+                m_data.decorator.bounding_boxes.pop_back();
+            }
+        }
         m_videoCtrl.RedrawBuffer();
         m_videoCtrl.SwapBuffers();
         m_videoCtrl.RedrawWindow();
@@ -130,7 +151,7 @@ void CTrackingDlg::OnBnClickedButton3()
         std::wstring path(fd.GetPathName().GetBuffer());
         std::string asciipath(path.begin(), path.end());
         cv::Size res(m_data.params.target_resolution_w, m_data.params.target_resolution_h);
-        m_data.source.video.from_file(asciipath, res);
+        m_data.source.video.from_file(asciipath, m_data.params.max_frames, res);
     }
     if (!m_data.source.video.frames.empty()) m_data.source.frame = 0;
     m_frameSlider.SetPos(0);
@@ -142,9 +163,16 @@ void CTrackingDlg::OnBnClickedButton3()
 
 void CTrackingDlg::OnSimulation()
 {
-    for (; m_data.source.frame < m_data.source.video.frames.size();
+    auto cfg = model::tracker::make_default_config();
+    model::tracker t(m_data.params);
+    for (; m_data.source.frame + 1 < m_data.source.video.frames.size();
          ++m_data.source.frame)
     {
+        if (!m_data.decorator.bounding_boxes.empty())
+        {
+            auto bb = t.track_one_region(m_data.decorator.bounding_boxes.front(), m_data.source, cfg);
+            m_data.decorator.bounding_boxes[0] = bb;
+        }
         Sleep(40);
         m_videoCtrl.RedrawBuffer();
         m_videoCtrl.SwapBuffers();
