@@ -52,7 +52,7 @@ namespace model
 
     struct video_data
     {
-        static const size_t memory_threshold = (((1 << 10) << 10) << 10) >> 2; // 500Mb
+        static const size_t memory_threshold = (((1 << 10) << 10) << 10); // 1Gb
         std::vector < cv::Mat > frames;
 
         void to_cbitmap(CBitmap & bmp, int frame) const
