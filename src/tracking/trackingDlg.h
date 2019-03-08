@@ -34,6 +34,7 @@ protected:
     DECLARE_MESSAGE_MAP()
 public:
     model::model_data m_data;
+    model::tracker::config m_cfg;
     CVideoPlayer m_videoCtrl;
     afx_msg void OnBnClickedButton1();
     afx_msg void OnBnClickedButton2();
@@ -41,4 +42,5 @@ public:
     afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
     afx_msg void OnBnClickedButton3();
     void OnSimulation() override;
+    BOOL m_bBlur;
 };

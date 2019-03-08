@@ -182,6 +182,7 @@ namespace model
             size_t pivot_neighborhood;
             size_t pivot_count;
             size_t mip_count;
+            bool blur;
         };
         static config make_default_config()
         {
@@ -191,7 +192,8 @@ namespace model
                 1e-3,
                 6,
                 4,
-                4
+                4,
+                false
             };
         }
     private:
@@ -201,18 +203,62 @@ namespace model
         {
         }
     public:
-        plot::world_t track_one_region(
-            plot::world_t bb0, const video_stream & s, const config & cfg) const
+        void track(
+            std::vector < plot::world_t > & bb0,
+            const video_stream & s,
+            const config & cfg) const
+        {
+            size_t rc = s.video.frames[0].rows;
+            size_t cc = s.video.frames[0].cols;
+
+            size_t maxmip = (size_t) std::fmax(std::floor(std::log2(std::fmin(rc, cc))) - 4, 0);
+
+            size_t mip = std::fmin(maxmip, cfg.mip_count);
+
+            std::vector < std::pair < cv::Mat, cv::Mat > > mips(mip);
+
+            mips[0] = { s.video.frames[s.frame], s.video.frames[s.frame + 1] };
+            for (size_t i = 1; i < mip; ++i)
+            {
+                cv::Size mipsize(cc / (1 << i), rc / (1 << i));
+                cv::resize(s.video.frames[s.frame], mips[i].first, mipsize);
+                cv::resize(s.video.frames[s.frame + 1], mips[i].second, mipsize);
+            }
+
+            for (size_t i = 0; i < bb0.size(); ++i)
+            {
+                geom::point2d_t grad = { 0, 0 };
+                for (size_t m = 0; m < mip; ++m)
+                {
+                    grad = grad + track(bb0[i], grad,
+                                        mips[mip - m - 1].first,
+                                        mips[mip - m - 1].second, cfg);
+                }
+                bb0[i] = { bb0[i].xmin + grad.x, bb0[i].xmax + grad.x,
+                           bb0[i].ymin + grad.y, bb0[i].ymax + grad.y
+                };
+            }
+        }
+        geom::point2d_t track(
+            const plot::world_t & bb0,
+            const geom::point2d_t & grad,
+            const cv::Mat & frame0,
+            const cv::Mat & frame1,
+            const config & cfg) const
         {
             plot::screen_t bb = {
-                (int) std::round(bb0.xmin * s.video.frames[0].cols),
-                (int) std::round(bb0.xmax * s.video.frames[0].cols),
-                (int) std::round(bb0.ymin * s.video.frames[0].rows),
-                (int) std::round(bb0.ymax * s.video.frames[0].rows)
+                (int) std::ceil(bb0.xmin * frame0.cols),
+                (int) std::ceil(bb0.xmax * frame0.cols),
+                (int) std::ceil(bb0.ymin * frame0.rows),
+                (int) std::ceil(bb0.ymax * frame0.rows)
             };
             geom::point < int > pc = {
-                (int) std::round((bb0.xmax + bb0.xmin) / 2 * s.video.frames[0].cols),
-                (int) std::round((bb0.ymax + bb0.ymin) / 2 * s.video.frames[0].rows)
+                (int) std::round((bb0.xmax + bb0.xmin) / 2 * frame0.cols),
+                (int) std::round((bb0.ymax + bb0.ymin) / 2 * frame0.rows)
+            };
+            geom::point < int > gc = {
+                (int) std::round(grad.x * frame0.cols),
+                (int) std::round(grad.y * frame0.rows)
             };
 
             std::vector < geom::point < int > > pivots(1 + cfg.pivot_count);
@@ -232,6 +278,8 @@ namespace model
             size_t wndcols = (size_t) (3 * sx);
             if ((wndrows & 1) == 0) ++wndrows;
             if ((wndcols & 1) == 0) ++wndcols;
+            if (wndrows < 3) wndrows = 3;
+            if (wndcols < 3) wndcols = 3;
 
             cv::Mat wnd(wndrows, wndcols, CV_32F);
 
@@ -250,25 +298,36 @@ namespace model
 
             for (size_t i = 0; i < pivots.size(); ++i)
             {
-                if (!track_one_point(pivots[i], wnd, s, cfg, dt)) continue;
+                if (!track(pivots[i], gc, wnd, frame0, frame1, cfg, dt)) continue;
                 dd = dd + dt;
                 ++n;
             }
 
             if (n > 0) dd = dd / (int) n;
 
-            return { bb0.xmin + dd.x, bb0.xmax + dd.x, bb0.ymin + dd.y, bb0.ymax + dd.y };
+            return dd;
         }
-        bool track_one_point(
+        bool track(
             plot::point < int > pc,
+            plot::point < int > grad,
             const cv::Mat & wnd,
-            const video_stream & s,
+            const cv::Mat & frame0,
+            const cv::Mat & frame1,
             const config & cfg,
             geom::point2d_t & out) const
         {
             cv::Mat ref, next;
-            cv::GaussianBlur(s.video.frames[s.frame], ref, cv::Size(), wnd.cols / 3, wnd.rows / 3);
-            cv::GaussianBlur(s.video.frames[s.frame + 1], next, cv::Size(), wnd.cols / 3, wnd.rows / 3);
+            
+            if (cfg.blur)
+            {
+                cv::GaussianBlur(frame0, ref, cv::Size(), wnd.cols / 3, wnd.rows / 3);
+                cv::GaussianBlur(frame1, next, cv::Size(), wnd.cols / 3, wnd.rows / 3);
+            }
+            else
+            {
+                ref = frame0;
+                next = frame1;
+            }
 
             cv::Mat a = cv::Mat::zeros(2, 2, CV_32FC1);
             cv::Mat b = cv::Mat::zeros(2, 1, CV_32FC1);
@@ -276,11 +335,13 @@ namespace model
             for (size_t i = 0; i < wnd.rows; ++i)
             for (size_t j = 0; j < wnd.cols; ++j)
             {
-                int r = pc.y - (int) i + wnd.rows / 2;
-                int c = pc.x - (int) j + wnd.cols / 2;
-                int ri[3] = { r - 1, r, r + 1 };
-                int ci[3] = { c - 1, c, c + 1 };
-                for (size_t k = 0; k < 3; ++k)
+                int r0 = pc.y - (int) i + wnd.rows / 2;
+                int c0 = pc.x - (int) j + wnd.cols / 2;
+                int r1 = pc.y - (int) i + wnd.rows / 2 + grad.y;
+                int c1 = pc.x - (int) j + wnd.cols / 2 + grad.x;
+                int ri[6] = { r0 - 1, r0, r0 + 1, r1 - 1, r1, r1 + 1 };
+                int ci[6] = { c0 - 1, c0, c0 + 1, c1 - 1, c1, c1 + 1 };
+                for (size_t k = 0; k < 6; ++k)
                 {
                     if (ri[k] < 0) ri[k] = 0;
                     if (ri[k] >= ref.rows) ri[k] = ref.rows - 1;
@@ -289,7 +350,7 @@ namespace model
                 }
                 float dy = (ref.at < float > (ri[2], ci[1]) - ref.at < float > (ri[0], ci[1])) / 2;
                 float dx = (ref.at < float > (ri[1], ci[2]) - ref.at < float > (ri[1], ci[0])) / 2;
-                float dt = next.at < float > (ri[1], ci[1]) - ref.at < float > (ri[1], ci[1]);
+                float dt = next.at < float > (ri[3 + 1], ci[3 + 1]) - ref.at < float > (ri[1], ci[1]);
                 float wi = wnd.at < float > (i, j);
                 
                 a.at < float > (0, 0) += wi * dx * dx;
@@ -310,8 +371,8 @@ namespace model
 
             cv::Mat x = a * b;
 
-            float dx = x.at < float > (0) / s.video.frames[0].cols;
-            float dy = x.at < float > (1) / s.video.frames[0].rows;
+            float dx = x.at < float > (0) / frame0.cols;
+            float dy = x.at < float > (1) / frame0.rows;
 
             out = { dx, dy };
 

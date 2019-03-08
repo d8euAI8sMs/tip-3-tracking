@@ -14,9 +14,11 @@
 
 CTrackingDlg::CTrackingDlg(CWnd* pParent /*=NULL*/)
     : CSimulationDialog(CTrackingDlg::IDD, pParent)
+    , m_bBlur(FALSE)
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
     m_data.params = model::make_default_parameters();
+    m_cfg = model::tracker::make_default_config();
 }
 
 void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
@@ -27,6 +29,10 @@ void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Text(pDX, IDC_EDIT1, m_data.params.target_resolution_w);
     DDX_Text(pDX, IDC_EDIT2, m_data.params.target_resolution_h);
     DDX_Text(pDX, IDC_EDIT3, m_data.params.max_frames);
+    DDX_Text(pDX, IDC_EDIT4, m_cfg.mip_count);
+    DDX_Text(pDX, IDC_EDIT5, m_cfg.pivot_count);
+    DDX_Text(pDX, IDC_EDIT6, m_cfg.pivot_neighborhood);
+    DDX_Check(pDX, IDC_CHECK1, m_bBlur);
 }
 
 BEGIN_MESSAGE_MAP(CTrackingDlg, CSimulationDialog)
@@ -64,16 +70,17 @@ BOOL CTrackingDlg::OnInitDialog()
                 m_data.decorator.bounding_boxes.emplace_back(
                     p0.x, p1.x, p0.y, p1.y
                 );
+                m_data.decorator.markers.pop_back();
             }
-            m_data.decorator.markers.push_back(p);
-        }
-        else if (!m_data.decorator.markers.empty())
-        {
-            m_data.decorator.markers.pop_back();
-            if (m_data.decorator.markers.size() & 1 == 1)
+            else
             {
-                m_data.decorator.bounding_boxes.pop_back();
+                m_data.decorator.markers.push_back(p);
             }
+        }
+        else
+        {
+            m_data.decorator.markers.clear();
+            m_data.decorator.bounding_boxes.clear();
         }
         m_videoCtrl.RedrawBuffer();
         m_videoCtrl.SwapBuffers();
@@ -124,6 +131,7 @@ void CTrackingDlg::OnBnClickedButton1()
 {
     UpdateData(TRUE);
     m_data.source.frame = m_frameSlider.GetPos();
+    m_cfg.blur = (m_bBlur == TRUE);
     StartSimulationThread();
 }
 
@@ -163,16 +171,11 @@ void CTrackingDlg::OnBnClickedButton3()
 
 void CTrackingDlg::OnSimulation()
 {
-    auto cfg = model::tracker::make_default_config();
     model::tracker t(m_data.params);
     for (; m_data.source.frame + 1 < m_data.source.video.frames.size();
          ++m_data.source.frame)
     {
-        if (!m_data.decorator.bounding_boxes.empty())
-        {
-            auto bb = t.track_one_region(m_data.decorator.bounding_boxes.front(), m_data.source, cfg);
-            m_data.decorator.bounding_boxes[0] = bb;
-        }
+        t.track(m_data.decorator.bounding_boxes, m_data.source, m_cfg);
         Sleep(40);
         m_videoCtrl.RedrawBuffer();
         m_videoCtrl.SwapBuffers();
