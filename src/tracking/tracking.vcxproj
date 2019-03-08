@@ -122,6 +122,7 @@
     <ClInclude Include="targetver.h" />
     <ClInclude Include="tracking.h" />
     <ClInclude Include="trackingDlg.h" />
+    <ClInclude Include="VideoPlayer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -130,6 +131,7 @@
     </ClCompile>
     <ClCompile Include="tracking.cpp" />
     <ClCompile Include="trackingDlg.cpp" />
+    <ClCompile Include="VideoPlayer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="tracking.rc" />

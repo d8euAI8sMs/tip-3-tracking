@@ -50,10 +50,14 @@ BOOL CTrackingDlg::OnInitDialog()
 
     // TODO: Add extra initialization here
 
-    m_videoCtrl.triple_buffered = true;
-
-    m_videoCtrl.plot_layer.with(model::make_bmp_plot(m_data.source));
-    m_videoCtrl.plot_layer.with(model::make_decorator_plot(m_data.decorator));
+    m_videoCtrl.Init(m_data);
+    m_videoCtrl.callback = [this] (const geom::point < int > & p, bool lbutton) {
+        if (lbutton) m_data.decorator.markers.push_back(p);
+        else m_data.decorator.markers.clear();
+        m_videoCtrl.RedrawBuffer();
+        m_videoCtrl.SwapBuffers();
+        m_videoCtrl.RedrawWindow();
+    };
 
     return TRUE;  // return TRUE  unless you set the focus to a control
 }

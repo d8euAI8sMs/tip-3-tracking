@@ -53,7 +53,7 @@ namespace model
         static const size_t memory_threshold = (((1 << 10) << 10) << 10) >> 2; // 500Mb
         std::vector < cv::Mat > frames;
 
-        video_data & to_cbitmap(CBitmap & bmp, int frame)
+        void to_cbitmap(CBitmap & bmp, int frame) const
         {
             auto & mat = frames[frame];
             std::vector < COLORREF > buf(mat.rows * mat.cols);
@@ -76,7 +76,6 @@ namespace model
             bmp.DeleteObject();
             bmp.CreateBitmap(mat.cols, mat.rows, 1, sizeof(COLORREF) * 8, (LPCVOID) buf.data());
             bmp.SetBitmapDimension(mat.cols, mat.rows);
-            return *this;
         }
         video_data & from_file(const std::string & path, cv::Size resolution = cv::Size())
         {
@@ -112,7 +111,7 @@ namespace model
         std::vector < plot::screen_t > bounding_boxes;
     };
 
-    inline plot::drawable::ptr_t make_bmp_plot(video_stream & s)
+    inline plot::drawable::ptr_t make_bmp_plot(const video_stream & s)
     {
         return plot::custom_drawable::create([&s] (CDC & dc, const plot::viewport & vp)
         {
@@ -128,17 +127,17 @@ namespace model
         });
     }
 
-    inline plot::drawable::ptr_t make_decorator_plot(decorator_data & d)
+    inline plot::drawable::ptr_t make_decorator_plot(const decorator_data & d)
     {
         return plot::custom_drawable::create([&d] (CDC & dc, const plot::viewport & vp)
         {
             if (d.decorator_mask & decorator_data::decorator_markers)
             {
-                auto brush = plot::palette::brush(RGB(100,100,255));
+                auto brush = plot::palette::brush(RGB(100,255,100));
                 for each (auto & marker in d.markers)
                 {
-                    CRect rect(marker - geom::point < int > (3, 3),
-                               marker + geom::point < int > (3, 3));
+                    CRect rect(marker - geom::point < int > (4, 4),
+                               marker + geom::point < int > (4, 4));
                     dc.FillRect(rect, brush.get());
                 }
             }

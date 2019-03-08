@@ -8,6 +8,7 @@
 #include "afxcmn.h"
 
 #include "model.h"
+#include "VideoPlayer.h"
 
 // CTrackingDlg dialog
 class CTrackingDlg : public CSimulationDialog
@@ -33,7 +34,7 @@ protected:
     DECLARE_MESSAGE_MAP()
 public:
     model::model_data m_data;
-    CPlotControl m_videoCtrl;
+    CVideoPlayer m_videoCtrl;
     afx_msg void OnBnClickedButton1();
     afx_msg void OnBnClickedButton2();
     CSliderCtrl m_frameSlider;
