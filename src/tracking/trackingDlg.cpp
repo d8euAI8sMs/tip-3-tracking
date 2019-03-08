@@ -142,7 +142,7 @@ void CTrackingDlg::OnBnClickedButton3()
 
 void CTrackingDlg::OnSimulation()
 {
-    for (; m_bWorking && (m_data.source.frame < m_data.source.video.frames.size());
+    for (; m_data.source.frame < m_data.source.video.frames.size();
          ++m_data.source.frame)
     {
         Sleep(40);
@@ -152,5 +152,6 @@ void CTrackingDlg::OnSimulation()
             m_frameSlider.SetPos(m_data.source.frame);
             m_videoCtrl.RedrawWindow();
         });
+        if (!m_bWorking) break;
     }
 }
