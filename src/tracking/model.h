@@ -183,6 +183,7 @@ namespace model
             size_t pivot_count;
             size_t mip_count;
             bool blur;
+            bool strong_blur;
         };
         static config make_default_config()
         {
@@ -278,8 +279,8 @@ namespace model
             size_t wndcols = (size_t) (3 * sx);
             if ((wndrows & 1) == 0) ++wndrows;
             if ((wndcols & 1) == 0) ++wndcols;
-            if (wndrows < 3) wndrows = 3;
-            if (wndcols < 3) wndcols = 3;
+            if (wndrows < 5) wndrows = 5;
+            if (wndcols < 5) wndcols = 5;
 
             cv::Mat wnd(wndrows, wndcols, CV_32F);
 
@@ -318,10 +319,15 @@ namespace model
         {
             cv::Mat ref, next;
             
-            if (cfg.blur)
+            if (cfg.strong_blur)
             {
                 cv::GaussianBlur(frame0, ref, cv::Size(), wnd.cols / 3, wnd.rows / 3);
                 cv::GaussianBlur(frame1, next, cv::Size(), wnd.cols / 3, wnd.rows / 3);
+            }
+            else if (cfg.blur)
+            {
+                cv::GaussianBlur(frame0, ref, cv::Size(5, 5), 0);
+                cv::GaussianBlur(frame1, next, cv::Size(5, 5), 0);
             }
             else
             {

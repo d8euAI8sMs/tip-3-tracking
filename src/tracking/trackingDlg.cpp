@@ -32,7 +32,9 @@ void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Text(pDX, IDC_EDIT4, m_cfg.mip_count);
     DDX_Text(pDX, IDC_EDIT5, m_cfg.pivot_count);
     DDX_Text(pDX, IDC_EDIT6, m_cfg.pivot_neighborhood);
+    DDX_Text(pDX, IDC_EDIT7, m_cfg.eigenvalue_threshold);
     DDX_Check(pDX, IDC_CHECK1, m_bBlur);
+    DDX_Check(pDX, IDC_CHECK2, m_bStrongBlur);
 }
 
 BEGIN_MESSAGE_MAP(CTrackingDlg, CSimulationDialog)
@@ -132,6 +134,7 @@ void CTrackingDlg::OnBnClickedButton1()
     UpdateData(TRUE);
     m_data.source.frame = m_frameSlider.GetPos();
     m_cfg.blur = (m_bBlur == TRUE);
+    m_cfg.strong_blur = (m_bStrongBlur == TRUE);
     StartSimulationThread();
 }
 

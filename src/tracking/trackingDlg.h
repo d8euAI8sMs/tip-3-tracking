@@ -43,4 +43,5 @@ public:
     afx_msg void OnBnClickedButton3();
     void OnSimulation() override;
     BOOL m_bBlur;
+    BOOL m_bStrongBlur;
 };
