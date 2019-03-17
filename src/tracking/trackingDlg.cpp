@@ -30,11 +30,9 @@ void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Text(pDX, IDC_EDIT2, m_data.params.target_resolution_h);
     DDX_Text(pDX, IDC_EDIT3, m_data.params.max_frames);
     DDX_Text(pDX, IDC_EDIT4, m_cfg.mip_count);
-    DDX_Text(pDX, IDC_EDIT5, m_cfg.pivot_count);
-    DDX_Text(pDX, IDC_EDIT6, m_cfg.pivot_neighborhood);
     DDX_Text(pDX, IDC_EDIT7, m_cfg.eigenvalue_threshold);
+    DDX_Text(pDX, IDC_EDIT8, m_cfg.feature_threshold);
     DDX_Check(pDX, IDC_CHECK1, m_bBlur);
-    DDX_Check(pDX, IDC_CHECK2, m_bStrongBlur);
 }
 
 BEGIN_MESSAGE_MAP(CTrackingDlg, CSimulationDialog)
@@ -134,7 +132,6 @@ void CTrackingDlg::OnBnClickedButton1()
     UpdateData(TRUE);
     m_data.source.frame = m_frameSlider.GetPos();
     m_cfg.blur = (m_bBlur == TRUE);
-    m_cfg.strong_blur = (m_bStrongBlur == TRUE);
     StartSimulationThread();
 }
 
@@ -178,7 +175,7 @@ void CTrackingDlg::OnSimulation()
     for (; m_data.source.frame + 1 < m_data.source.video.frames.size();
          ++m_data.source.frame)
     {
-        t.track(m_data.decorator.bounding_boxes, m_data.source, m_cfg);
+        t.track(m_data.decorator.bounding_boxes, m_data.decorator.opflow, m_data.source, m_cfg);
         Sleep(40);
         m_videoCtrl.RedrawBuffer();
         m_videoCtrl.SwapBuffers();

@@ -112,6 +112,7 @@ namespace model
         size_t decorator_mask = 0xff;
         std::vector < geom::point2d_t > markers;
         std::vector < plot::world_t > bounding_boxes;
+        std::vector < std::pair < geom::point2d_t, geom::point2d_t > > opflow;
     };
 
     inline plot::drawable::ptr_t make_bmp_plot(const video_stream & s)
@@ -165,6 +166,18 @@ namespace model
                     dc.LineTo({ b.xmin, b.ymin });
                 }
             }
+            if (true)
+            {
+                auto pen = plot::palette::pen(RGB(0,100,255), 1);
+                dc.SelectObject(pen.get());
+                for each (auto & v in d.opflow)
+                {
+                    auto p1 = v.first;
+                    auto p2 = p1 + v.second;
+                    dc.MoveTo(CPoint(p1.x * vp.screen.width(), p1.y * vp.screen.height()));
+                    dc.LineTo(CPoint(p2.x * vp.screen.width(), p2.y * vp.screen.height()));
+                }
+            }
         });
     }
 
@@ -179,20 +192,17 @@ namespace model
         {
             std::vector < geom::point < int > > trackpoints;
             float eigenvalue_threshold;
-            size_t pivot_neighborhood;
-            size_t pivot_count;
+            float feature_threshold;
             size_t mip_count;
             bool blur;
-            bool strong_blur;
         };
         static config make_default_config()
         {
             return
             {
                 {},
-                1e-3,
-                6,
-                4,
+                0.01,
+                0.04,
                 4,
                 false
             };
@@ -204,8 +214,55 @@ namespace model
         {
         }
     public:
+        void good_features_to_track(
+            plot::world_t bb0,
+            const cv::Mat & frame0,
+            const cv::Mat & frame1,
+            std::vector < geom::point2d_t > & pivots,
+            const config & cfg) const
+        {
+            pivots.clear();
+
+            plot::screen_t bb = {
+                (int) std::ceil(bb0.xmin * frame0.cols) - 3,
+                (int) std::ceil(bb0.xmax * frame0.cols) + 3,
+                (int) std::ceil(bb0.ymin * frame0.rows) - 3,
+                (int) std::ceil(bb0.ymax * frame0.rows) + 3
+            };
+
+            if (bb.width() <= 0 || bb.height() <= 0) return;
+
+            std::vector < float > quality(bb.height() * bb.width());
+
+            float maxquality = 0;
+
+            for (size_t i = 0; i < bb.height(); ++i)
+            for (size_t j = 0; j < bb.width(); ++j)
+            {
+                geom::point2d_t pivot = {
+                    ((int) j + bb.xmin) / (float) frame0.cols,
+                    ((int) i + bb.ymin) / (float) frame0.rows
+                }, grad;
+                quality[i * bb.width() + j] = track(
+                    pivot, { 0, 0 }, frame0, frame1, grad, cfg);
+                maxquality = std::fmax(maxquality, quality[i * bb.width() + j]);
+            }
+
+            for (size_t i = 0; i < bb.height(); ++i)
+            for (size_t j = 0; j < bb.width(); ++j)
+            {
+                if (quality[i * bb.width() + j] < std::fmin(
+                        cfg.eigenvalue_threshold, maxquality * cfg.feature_threshold))
+                    continue;
+                pivots.emplace_back(
+                    ((int) j + bb.xmin) / (float) frame0.cols,
+                    ((int) i + bb.ymin) / (float) frame0.rows
+                );
+            }
+        }
         void track(
             std::vector < plot::world_t > & bb0,
+            std::vector < std::pair < geom::point2d_t, geom::point2d_t > > & flow,
             const video_stream & s,
             const config & cfg) const
         {
@@ -218,99 +275,140 @@ namespace model
 
             std::vector < std::pair < cv::Mat, cv::Mat > > mips(mip);
 
-            mips[0] = { s.video.frames[s.frame], s.video.frames[s.frame + 1] };
+            mips[0] = { s.video.frames[s.frame].clone(), s.video.frames[s.frame + 1].clone() };
+
             for (size_t i = 1; i < mip; ++i)
             {
                 cv::Size mipsize(cc / (1 << i), rc / (1 << i));
-                cv::resize(s.video.frames[s.frame], mips[i].first, mipsize);
-                cv::resize(s.video.frames[s.frame + 1], mips[i].second, mipsize);
+                cv::resize(mips[0].first, mips[i].first, mipsize);
+                cv::resize(mips[0].second, mips[i].second, mipsize);
             }
+
+            if (cfg.blur)
+            {
+                for (size_t i = 0; i < mip; ++i)
+                {
+                    cv::medianBlur(mips[i].first, mips[i].first, 5);
+                    cv::medianBlur(mips[i].second, mips[i].second, 5);
+                    cv::GaussianBlur(mips[i].first, mips[i].first, cv::Size(5, 5), 0);
+                    cv::GaussianBlur(mips[i].second, mips[i].second, cv::Size(5, 5), 0);
+                }
+            }
+
+            flow.clear();
 
             for (size_t i = 0; i < bb0.size(); ++i)
             {
-                geom::point2d_t grad = { 0, 0 };
+                std::vector < geom::point2d_t > pivots;
+
+                good_features_to_track(bb0[i], mips.front().first, mips.front().second, pivots, cfg);
+
+                std::vector < geom::point2d_t > grads(pivots.size());
+                std::vector < geom::point2d_t > tmpgrads(pivots.size());
+                std::vector < float > qual(pivots.size(), true);
+                std::vector < bool > state(pivots.size(), true);
+
                 for (size_t m = 0; m < mip; ++m)
                 {
-                    grad = grad + track(bb0[i], grad,
-                                        mips[mip - m - 1].first,
-                                        mips[mip - m - 1].second, cfg);
+                    track(pivots, tmpgrads, grads, qual, state,
+                          mips[mip - m - 1].first,
+                          mips[mip - m - 1].second, cfg);
                 }
-                bb0[i] = { bb0[i].xmin + grad.x, bb0[i].xmax + grad.x,
-                           bb0[i].ymin + grad.y, bb0[i].ymax + grad.y
+
+                plot::world_t bbn = {
+                    10000, 0,
+                    10000, 0,
                 };
+
+                for (size_t p = 0; p < pivots.size(); ++p)
+                {
+                    if (!state[p]) continue;
+                    auto pivot1 = pivots[p];
+                    auto pivot2 = pivots[p] + grads[p];
+
+                    bbn.xmin = std::fmin(bbn.xmin, pivot1.x);
+                    bbn.xmax = std::fmax(bbn.xmax, pivot1.x);
+                    bbn.ymin = std::fmin(bbn.ymin, pivot1.y);
+                    bbn.ymax = std::fmax(bbn.ymax, pivot1.y);
+
+                    bbn.xmin = std::fmin(bbn.xmin, pivot2.x);
+                    bbn.xmax = std::fmax(bbn.xmax, pivot2.x);
+                    bbn.ymin = std::fmin(bbn.ymin, pivot2.y);
+                    bbn.ymax = std::fmax(bbn.ymax, pivot2.y);
+                }
+
+                bb0[i] = bbn;
+
+                for (size_t p = 0; p < pivots.size(); ++p)
+                {
+                    if (!state[p]) continue;
+                    flow.emplace_back(pivots[p], grads[p]);
+                }
             }
         }
-        geom::point2d_t track(
-            const plot::world_t & bb0,
-            const geom::point2d_t & grad,
+        void track(
+            const std::vector < geom::point2d_t > & pc0,
+            std::vector < geom::point2d_t > & tmpgrad,
+            std::vector < geom::point2d_t > & grad,
+            std::vector < float > & qual,
+            std::vector < bool > & state,
             const cv::Mat & frame0,
             const cv::Mat & frame1,
             const config & cfg) const
         {
-            plot::screen_t bb = {
-                (int) std::ceil(bb0.xmin * frame0.cols),
-                (int) std::ceil(bb0.xmax * frame0.cols),
-                (int) std::ceil(bb0.ymin * frame0.rows),
-                (int) std::ceil(bb0.ymax * frame0.rows)
-            };
-            geom::point < int > pc = {
-                (int) std::round((bb0.xmax + bb0.xmin) / 2 * frame0.cols),
-                (int) std::round((bb0.ymax + bb0.ymin) / 2 * frame0.rows)
-            };
-            geom::point < int > gc = {
-                (int) std::round(grad.x * frame0.cols),
-                (int) std::round(grad.y * frame0.rows)
-            };
-
-            std::vector < geom::point < int > > pivots(1 + cfg.pivot_count);
-            pivots[0] = pc;
-            for (size_t i = 1; i < cfg.pivot_count; ++i)
+            geom::point2d_t newgrad;
+            float maxqual = 0;
+            for (size_t i = 0; i < pc0.size(); ++i)
             {
-                pivots[i] = {
-                    pc.x + (rand() / (RAND_MAX + 1.0) - 0.5) * cfg.pivot_neighborhood,
-                    pc.y + (rand() / (RAND_MAX + 1.0) - 0.5) * cfg.pivot_neighborhood
-                };
+                if (!state[i]) continue;
+                qual[i] = track(pc0[i], grad[i], frame0, frame1, newgrad, cfg);
+                if (qual[i] < cfg.eigenvalue_threshold) state[i] = false;
+                tmpgrad[i] = grad[i] + newgrad;
+                maxqual = std::fmax(maxqual, qual[i]);
             }
+            for (size_t i = 0; i < pc0.size(); ++i)
+            {
+                if (!state[i]) continue;
+                if (qual[i] < maxqual * cfg.feature_threshold)
+                {
+                    state[i] = false;
+                }
+                else
+                {
+                    grad[i] = tmpgrad[i];
+                }
+            }
+        }
+        float track(
+            const geom::point2d_t & pc0,
+            const geom::point2d_t & grad,
+            const cv::Mat & frame0,
+            const cv::Mat & frame1,
+            geom::point2d_t & out,
+            const config & cfg) const
+        {
+            size_t wndsize = 13;
 
-            float sx = bb.width() / 2.0 / 3.0;
-            float sy = bb.height() / 2.0 / 3.0;
+            float sx = wndsize / 3. / 2.;
+            float sy = wndsize / 3. / 2.;
 
-            size_t wndrows = (size_t) (3 * sy);
-            size_t wndcols = (size_t) (3 * sx);
-            if ((wndrows & 1) == 0) ++wndrows;
-            if ((wndcols & 1) == 0) ++wndcols;
-            if (wndrows < 5) wndrows = 5;
-            if (wndcols < 5) wndcols = 5;
+            cv::Mat wnd(wndsize, wndsize, CV_32F);
 
-            cv::Mat wnd(wndrows, wndcols, CV_32F);
-
-            for (size_t i = 0; i <= wndrows / 2; ++i)
-            for (size_t j = 0; j <= wndcols / 2; ++j)
+            for (size_t i = 0; i <= wndsize / 2; ++i)
+            for (size_t j = 0; j <= wndsize / 2; ++j)
             {
                 double d = std::exp(-1.0 * ((int)i * (int)i / sy / sy + (int)j * (int)j / sx / sx) / 2);
-                wnd.at < float > (wndrows / 2 - (int)i, wndcols / 2 - (int)j) = (float) d;
-                wnd.at < float > (wndrows / 2 + (int)i, wndcols / 2 + (int)j) = (float) d;
-                wnd.at < float > (wndrows / 2 - (int)i, wndcols / 2 + (int)j) = (float) d;
-                wnd.at < float > (wndrows / 2 + (int)i, wndcols / 2 - (int)j) = (float) d;
+                wnd.at < float > (wndsize / 2 - (int)i, wndsize / 2 - (int)j) = (float) d;
+                wnd.at < float > (wndsize / 2 + (int)i, wndsize / 2 + (int)j) = (float) d;
+                wnd.at < float > (wndsize / 2 - (int)i, wndsize / 2 + (int)j) = (float) d;
+                wnd.at < float > (wndsize / 2 + (int)i, wndsize / 2 - (int)j) = (float) d;
             }
 
-            geom::point2d_t dd = { 0, 0 }, dt;
-            size_t n = 0;
-
-            for (size_t i = 0; i < pivots.size(); ++i)
-            {
-                if (!track(pivots[i], gc, wnd, frame0, frame1, cfg, dt)) continue;
-                dd = dd + dt;
-                ++n;
-            }
-
-            if (n > 0) dd = dd / (int) n;
-
-            return dd;
+            return track(pc0, grad, wnd, frame0, frame1, cfg, out);
         }
-        bool track(
-            plot::point < int > pc,
-            plot::point < int > grad,
+        float track(
+            const geom::point2d_t & pc0,
+            const geom::point2d_t & grad,
             const cv::Mat & wnd,
             const cv::Mat & frame0,
             const cv::Mat & frame1,
@@ -318,22 +416,18 @@ namespace model
             geom::point2d_t & out) const
         {
             cv::Mat ref, next;
-            
-            if (cfg.strong_blur)
-            {
-                cv::GaussianBlur(frame0, ref, cv::Size(), wnd.cols / 3, wnd.rows / 3);
-                cv::GaussianBlur(frame1, next, cv::Size(), wnd.cols / 3, wnd.rows / 3);
-            }
-            else if (cfg.blur)
-            {
-                cv::GaussianBlur(frame0, ref, cv::Size(5, 5), 0);
-                cv::GaussianBlur(frame1, next, cv::Size(5, 5), 0);
-            }
-            else
-            {
-                ref = frame0;
-                next = frame1;
-            }
+
+            geom::point < int > pc = {
+                (int) std::round(pc0.x * frame0.cols),
+                (int) std::round(pc0.y * frame0.rows)
+            };
+            geom::point < int > pc2 = {
+                (int) std::round((pc0.x + grad.x) * frame0.cols),
+                (int) std::round((pc0.y + grad.y) * frame0.rows)
+            };
+
+            ref = frame0;
+            next = frame1;
 
             cv::Mat a = cv::Mat::zeros(2, 2, CV_32FC1);
             cv::Mat b = cv::Mat::zeros(2, 1, CV_32FC1);
@@ -343,8 +437,8 @@ namespace model
             {
                 int r0 = pc.y - (int) i + wnd.rows / 2;
                 int c0 = pc.x - (int) j + wnd.cols / 2;
-                int r1 = pc.y - (int) i + wnd.rows / 2 + grad.y;
-                int c1 = pc.x - (int) j + wnd.cols / 2 + grad.x;
+                int r1 = pc2.y - (int) i + wnd.rows / 2;
+                int c1 = pc2.x - (int) j + wnd.cols / 2;
                 int ri[6] = { r0 - 1, r0, r0 + 1, r1 - 1, r1, r1 + 1 };
                 int ci[6] = { c0 - 1, c0, c0 + 1, c1 - 1, c1, c1 + 1 };
                 for (size_t k = 0; k < 6; ++k)
@@ -354,8 +448,17 @@ namespace model
                     if (ci[k] < 0) ci[k] = 0;
                     if (ci[k] >= ref.cols) ci[k] = ref.cols - 1;
                 }
-                float dy = (ref.at < float > (ri[2], ci[1]) - ref.at < float > (ri[0], ci[1])) / 2;
-                float dx = (ref.at < float > (ri[1], ci[2]) - ref.at < float > (ri[1], ci[0])) / 2;
+                // sobel operator to calculate more stable gradients
+                float dy = (
+                    2 * (ref.at < float > (ri[2], ci[1]) - ref.at < float > (ri[0], ci[1])) +
+                    1 * (ref.at < float > (ri[2], ci[0]) - ref.at < float > (ri[0], ci[0])) +
+                    1 * (ref.at < float > (ri[2], ci[2]) - ref.at < float > (ri[0], ci[2]))
+                    ) / 4; /* possibly 8? */
+                float dx = (
+                    2 * (ref.at < float > (ri[1], ci[2]) - ref.at < float > (ri[1], ci[0])) +
+                    1 * (ref.at < float > (ri[0], ci[2]) - ref.at < float > (ri[0], ci[0])) +
+                    1 * (ref.at < float > (ri[2], ci[2]) - ref.at < float > (ri[2], ci[0]))
+                    ) / 4; /* possibly 8? */
                 float dt = next.at < float > (ri[3 + 1], ci[3 + 1]) - ref.at < float > (ri[1], ci[1]);
                 float wi = wnd.at < float > (i, j);
                 
@@ -369,9 +472,6 @@ namespace model
 
             std::vector < float > eigen;
             cv::eigen(a, eigen);
-            
-            if (eigen[0] < cfg.eigenvalue_threshold ||
-                eigen[1] < cfg.eigenvalue_threshold) return false;
 
             cv::invert(a, a, cv::DECOMP_SVD);
 
@@ -382,7 +482,7 @@ namespace model
 
             out = { dx, dy };
 
-            return true;
+            return std::fmin(std::abs(eigen[0]), std::abs(eigen[1]));
         }
     };
 
