@@ -42,5 +42,4 @@ public:
     afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
     afx_msg void OnBnClickedButton3();
     void OnSimulation() override;
-    BOOL m_bBlur;
 };

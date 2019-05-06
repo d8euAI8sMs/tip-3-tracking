@@ -14,7 +14,6 @@
 
 CTrackingDlg::CTrackingDlg(CWnd* pParent /*=NULL*/)
     : CSimulationDialog(CTrackingDlg::IDD, pParent)
-    , m_bBlur(FALSE)
 {
     m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
     m_data.params = model::make_default_parameters();
@@ -26,10 +25,6 @@ void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
     CSimulationDialog::DoDataExchange(pDX);
     DDX_Control(pDX, IDC_SLIDER1, m_frameSlider);
     DDX_Control(pDX, IDC_VIDEO, m_videoCtrl);
-    DDX_Text(pDX, IDC_EDIT1, m_data.params.target_resolution_w);
-    DDX_Text(pDX, IDC_EDIT2, m_data.params.target_resolution_h);
-    DDX_Text(pDX, IDC_EDIT3, m_data.params.max_frames);
-    DDX_Check(pDX, IDC_CHECK1, m_bBlur);
 }
 
 BEGIN_MESSAGE_MAP(CTrackingDlg, CSimulationDialog)
