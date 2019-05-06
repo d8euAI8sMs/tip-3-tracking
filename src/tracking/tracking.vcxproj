@@ -60,7 +60,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>../../lib/opencv30/lib/msvc2013_x86</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world300d.lib</AdditionalDependencies>
+      <AdditionalDependencies>opencv_core300d.lib;opencv_video300d.lib;opencv_videoio300d.lib;opencv_tracking300d.lib;opencv_imgproc300d.lib</AdditionalDependencies>
     </Link>
     <Midl>
       <MkTypLibCompatible>false</MkTypLibCompatible>
@@ -73,7 +73,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <PostBuildEvent>
-      <Command>copy ..\..\lib\opencv30\lib\msvc2013_x86\opencv_world300d.dll $(OutDir) &amp;&amp; copy ..\..\lib\opencv30\lib\msvc2013_x86\opencv_ffmpeg300.dll $(OutDir)</Command>
+      <Command>copy ..\..\lib\opencv30\lib\msvc2013_x86\*.dll $(OutDir)</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy OpenCV DLLs</Message>
@@ -96,7 +96,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalLibraryDirectories>../../lib/opencv30/lib/msvc2013_x86</AdditionalLibraryDirectories>
-      <AdditionalDependencies>opencv_world300.lib</AdditionalDependencies>
+      <AdditionalDependencies>opencv_core300.lib;opencv_video300.lib;opencv_videoio300.lib;opencv_tracking300.lib;opencv_imgproc300.lib</AdditionalDependencies>
     </Link>
     <Midl>
       <MkTypLibCompatible>false</MkTypLibCompatible>
@@ -109,7 +109,7 @@
       <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <PostBuildEvent>
-      <Command>copy ..\..\lib\opencv30\lib\msvc2013_x86\opencv_world300.dll $(OutDir) &amp;&amp; copy ..\..\lib\opencv30\lib\msvc2013_x86\opencv_ffmpeg300.dll $(OutDir)</Command>
+      <Command>copy ..\..\lib\opencv30\lib\msvc2013_x86\*.dll $(OutDir)</Command>
     </PostBuildEvent>
     <PostBuildEvent>
       <Message>Copy OpenCV DLLs</Message>
