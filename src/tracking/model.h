@@ -14,6 +14,7 @@
 #include <util/common/geom/geom.h>
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/xfeatures2d.hpp>
 
 #ifndef M_PI
 #define M_PI 3.1415926535897932384626433832795
@@ -190,23 +191,33 @@ namespace model
     public:
         struct config
         {
-            std::vector < geom::point < int > > trackpoints;
-            float eigenvalue_threshold;
-            float feature_threshold;
-            size_t mip_count;
-            bool blur;
         };
         static config make_default_config()
         {
             return
             {
-                {},
-                0.01,
-                0.04,
-                4,
-                false
             };
         }
+        struct bbstate
+        {
+            std::vector < cv::KeyPoint > kp;
+            cv::Mat descrs;
+        };
+        struct state
+        {
+        public:
+            // in
+            std::vector < plot::world_t > * bb0;
+            video_stream * vs0;
+            config cfg;
+        private:
+            // out
+            cv::Ptr < cv::xfeatures2d::SIFT > sift;
+            cv::Ptr < cv::FlannBasedMatcher > matcher;
+            std::vector < bbstate > substates;
+        protected:
+            friend class tracker;
+        };
     private:
         const parameters & params;
     public:
@@ -214,89 +225,105 @@ namespace model
         {
         }
     public:
-        void track(
-            std::vector < plot::world_t > & bb0,
-            std::vector < std::pair < geom::point2d_t, geom::point2d_t > > & flow,
-            const video_stream & s,
-            const config & cfg) const
+        void begin_track(state & s) const
         {
-            auto ref = s.video.frames[s.frame].clone();
-            auto next = s.video.frames[s.frame + 1].clone();
+            auto train = s.vs0->video.frames[s.vs0->frame].clone();
 
-            ref.convertTo(ref, CV_8U, 255);
-            next.convertTo(next, CV_8U, 255);
+            train.convertTo(train, CV_8U, 255);
 
-            flow.clear();
+            s.sift = cv::xfeatures2d::SIFT::create(300);
+            s.matcher = cv::makePtr < cv::FlannBasedMatcher > ();
 
-            for (size_t i = 0; i < bb0.size(); ++i)
+            s.substates.clear();
+
+            for each (auto & bbi in *s.bb0)
             {
                 plot::screen_t bb = {
-                    (int) std::ceil(bb0[i].xmin * ref.cols) - 5,
-                    (int) std::ceil(bb0[i].xmax * ref.cols) + 5,
-                    (int) std::ceil(bb0[i].ymin * ref.rows) - 5,
-                    (int) std::ceil(bb0[i].ymax * ref.rows) + 5
+                    (int) std::ceil(bbi.xmin * train.cols),
+                    (int) std::ceil(bbi.xmax * train.cols),
+                    (int) std::ceil(bbi.ymin * train.rows),
+                    (int) std::ceil(bbi.ymax * train.rows)
                 };
 
-                if (bb.xmin < 0) bb.xmin = 0;
-                if (bb.ymin < 0) bb.ymin = 0;
-                if (bb.xmax >= ref.cols) bb.xmax = ref.cols - 1;
-                if (bb.ymax >= ref.rows) bb.ymax = ref.rows - 1;
+                s.substates.emplace_back();
 
                 if (bb.width() <= 5 || bb.height() <= 5) continue;
-               
-                std::vector<cv::Point2f> points[2];
-                cv::Mat status, err;
-                cv::goodFeaturesToTrack(
-                    ref.colRange(bb.xmin, bb.xmax).rowRange(bb.ymin, bb.ymax),
-                    points[0], 1000, cfg.feature_threshold, 1);
 
-                if (points[0].size() < 5) continue;
+                s.sift->detectAndCompute(train.colRange(bb.xmin, bb.xmax)
+                                              .rowRange(bb.ymin, bb.ymax),
+                                         cv::Mat(),
+                                         s.substates.back().kp,
+                                         s.substates.back().descrs);
+            }
+        }
+        void track(const state & s) const
+        {
+            auto cur = s.vs0->video.frames[s.vs0->frame].clone();
 
-                cv::calcOpticalFlowPyrLK(
-                    ref.colRange(bb.xmin, bb.xmax).rowRange(bb.ymin, bb.ymax),
-                    next.colRange(bb.xmin, bb.xmax).rowRange(bb.ymin, bb.ymax),
-                    points[0], points[1], status, err);
+            cur.convertTo(cur, CV_8U, 255);
 
+            for (size_t i = 0; i < s.bb0->size(); ++i)
+            {
+                if (s.substates[i].kp.size() < 2) continue;
+
+                auto & bbi = s.bb0->at(i);
+
+                plot::screen_t bb = {
+                    (int) std::ceil((bbi.xmin - bbi.width() * 0.25) * cur.cols),
+                    (int) std::ceil((bbi.xmax + bbi.width() * 0.25) * cur.cols),
+                    (int) std::ceil((bbi.ymin - bbi.height() * 0.25) * cur.rows),
+                    (int) std::ceil((bbi.ymax + bbi.height() * 0.25) * cur.rows)
+                };
+                if (bb.xmin < 0) bb.xmin = 0;
+                if (bb.ymin < 0) bb.ymin = 0;
+                if (bb.xmax >= cur.cols) bb.xmax = cur.cols - 1;
+                if (bb.ymax >= cur.rows) bb.ymax = cur.rows - 1;
+
+                if (bb.width() <= 5 || bb.height() <= 5) continue;
+
+                std::vector < cv::KeyPoint > kp;
+                std::vector < std::vector < cv::DMatch > > matches;
+                std::vector < cv::DMatch > good_matches;
+                std::vector < cv::Point2f > good_kp;
+                cv::Mat descrs;
+
+                s.sift->detectAndCompute(cur.colRange(bb.xmin, bb.xmax)
+                                            .rowRange(bb.ymin, bb.ymax),
+                                         cv::Mat(), kp, descrs);
+
+                if (kp.size() < 2) continue;
+
+                // up to 2 matches per key point
+                s.matcher->knnMatch(descrs, s.substates[i].descrs, matches, 2);
+
+                // D.Lowe ratio test
+                for each (auto match in matches)
+                {
+                    if (match.size() != 2) continue;
+                    if (match[0].distance > 0.7 * match[1].distance) continue;
+                    good_matches.push_back(match[0]);
+                    good_kp.push_back(kp[match[0].queryIdx].pt);
+                }
+
+                // no points found, skip frame
+                if (good_matches.size() < 1) continue;
+
+                // calculate new bb
                 plot::world_t bbn = {
                     10000, 0,
                     10000, 0,
                 };
 
-                for (size_t p = 0; p < points[0].size(); ++p)
+                for (size_t p = 0; p < good_kp.size(); ++p)
                 {
-                    if (status.at < std::uint8_t > (p, 0) == 0) continue;
-                    auto pivot1 = points[0][p];
-                    auto pivot2 = points[1][p];
-                    pivot1.x = bb0[i].xmin + pivot1.x / ref.cols;
-                    pivot1.y = bb0[i].ymin + pivot1.y / ref.rows;
-                    pivot2.x = bb0[i].xmin + pivot2.x / ref.cols;
-                    pivot2.y = bb0[i].ymin + pivot2.y / ref.rows;
-                
-                    bbn.xmin = std::fmin(bbn.xmin, pivot1.x);
-                    bbn.xmax = std::fmax(bbn.xmax, pivot1.x);
-                    bbn.ymin = std::fmin(bbn.ymin, pivot1.y);
-                    bbn.ymax = std::fmax(bbn.ymax, pivot1.y);
-                
-                    bbn.xmin = std::fmin(bbn.xmin, pivot2.x);
-                    bbn.xmax = std::fmax(bbn.xmax, pivot2.x);
-                    bbn.ymin = std::fmin(bbn.ymin, pivot2.y);
-                    bbn.ymax = std::fmax(bbn.ymax, pivot2.y);
+                    auto pivot = geom::point2d_t { bb.xmin + good_kp[p].x, bb.ymin + good_kp[p].y };
+                    bbn.xmin = std::fmin(bbn.xmin, pivot.x / cur.cols);
+                    bbn.xmax = std::fmax(bbn.xmax, pivot.x / cur.cols);
+                    bbn.ymin = std::fmin(bbn.ymin, pivot.y / cur.rows);
+                    bbn.ymax = std::fmax(bbn.ymax, pivot.y / cur.rows);
                 }
-                
-                bb0[i] = bbn;
-                
-                for (size_t p = 0; p < points[0].size(); ++p)
-                {
-                    auto pivot1 = points[0][p];
-                    auto pivot2 = points[1][p];
-                    pivot1.x = bb0[i].xmin + pivot1.x / ref.cols;
-                    pivot1.y = bb0[i].ymin + pivot1.y / ref.rows;
-                    pivot2.x = bb0[i].xmin + pivot2.x / ref.cols;
-                    pivot2.y = bb0[i].ymin + pivot2.y / ref.rows;
-                    if (status.at < std::uint8_t > (p, 0) == 0) continue;
-                    flow.emplace_back(geom::point2d_t{ pivot1.x, pivot1.y },
-                                      geom::point2d_t{ pivot2.x - pivot1.x, pivot2.y - pivot1.y });
-                }
+
+                bbi = bbn;
             }
         }
     };

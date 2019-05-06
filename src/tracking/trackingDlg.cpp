@@ -29,9 +29,6 @@ void CTrackingDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Text(pDX, IDC_EDIT1, m_data.params.target_resolution_w);
     DDX_Text(pDX, IDC_EDIT2, m_data.params.target_resolution_h);
     DDX_Text(pDX, IDC_EDIT3, m_data.params.max_frames);
-    DDX_Text(pDX, IDC_EDIT4, m_cfg.mip_count);
-    DDX_Text(pDX, IDC_EDIT7, m_cfg.eigenvalue_threshold);
-    DDX_Text(pDX, IDC_EDIT8, m_cfg.feature_threshold);
     DDX_Check(pDX, IDC_CHECK1, m_bBlur);
 }
 
@@ -131,7 +128,6 @@ void CTrackingDlg::OnBnClickedButton1()
 {
     UpdateData(TRUE);
     m_data.source.frame = m_frameSlider.GetPos();
-    m_cfg.blur = (m_bBlur == TRUE);
     StartSimulationThread();
 }
 
@@ -172,10 +168,18 @@ void CTrackingDlg::OnBnClickedButton3()
 void CTrackingDlg::OnSimulation()
 {
     model::tracker t(m_data.params);
+
+    model::tracker::state s;
+    s.bb0 = &m_data.decorator.bounding_boxes;
+    s.cfg = m_cfg;
+    s.vs0 = &m_data.source;
+
+    t.begin_track(s);
+
     for (; m_data.source.frame + 1 < m_data.source.video.frames.size();
          ++m_data.source.frame)
     {
-        t.track(m_data.decorator.bounding_boxes, m_data.decorator.opflow, m_data.source, m_cfg);
+        t.track(s);
         Sleep(40);
         m_videoCtrl.RedrawBuffer();
         m_videoCtrl.SwapBuffers();
