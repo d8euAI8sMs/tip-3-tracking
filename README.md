@@ -4,7 +4,7 @@ Part of [d8euAI8sMs](https://github.com/d8euAI8sMs) namespace. See [`learning` r
 
 ## About
 
-Video tracking using the Lucas-Kanade tracking method.
+Video tracking using the SIFT tracking method.
 
 ## Status and Artifacts
 
